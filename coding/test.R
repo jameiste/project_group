@@ -46,4 +46,4 @@ library("readxl")
 df <- data.frame(read_excel("data/Real estate valuation data set.xlsx"))
 # Modify the data
 column_names<- c("no", "transaction_date", "house_wage", "distance_metro", "distance_store", "latitude", "longitude", "house_price")
-colnames(df)<- column_names
+colnames(df)<-column_names
