@@ -54,23 +54,24 @@ rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
 )
 
 # --- Prepare data for regression ---
+rent_data$log_price <- log(rent_data$price)
 rent_data[rent_data == "null"] <- NA
 rent_data[rent_data == ""] <- NA
 # Drop rows with NA (inspiration: https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame)
 rent_data <- rent_data[complete.cases(rent_data),]
 
 # Modify the data
-columns_of_interest <- c("price", "square_feet", "bedrooms", "bathrooms", "cityname", "state", "longitude", "latitude")
+columns_of_interest <- c("price", "log_price", "square_feet", "bedrooms", "bathrooms", "cityname", "state", "longitude", "latitude")
 rent_data <- rent_data[, columns_of_interest]
 
 
 # Predictors for regression
 regression_columns <- c("square_feet", "bedrooms", "bathrooms", "latitude", "state", "longitude")
 # Numeric columns 
-numeric_columns <- c("price", "square_feet", "bedrooms", "bathrooms", "latitude", "longitude")
+numeric_columns <- c("price", "log_price", "square_feet", "bedrooms", "bathrooms", "latitude", "longitude")
 rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
-target <- "price"
-numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric)],target)
+target <- "log_price"
+numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric)],c(target, "price"))
 
 # Handle state as categorical
 # rent_data <- rent_data[!(rent_data$state == names(sort(table(rent_data$state)))[1]),] # kick out the state with least entries (dummy-variable trap)
@@ -95,8 +96,8 @@ linear_regression_coefficient <- data.frame(
 )
 fitted_values_df <- data.frame(
   actual = rent_data$price,
-  fitted = predict(linear_regression),
-  residuals = residuals(linear_regression)
+  fitted = exp(predict(linear_regression)),
+  residuals = rent_data$log_price - (predict(linear_regression))
 )
 # Plot results
 l_r_coef_inte <- linear_regression_coefficient[linear_regression_coefficient$parameter != "(Intercept)",] # Kick out the intercept
@@ -114,7 +115,7 @@ plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
   geom_point(color = "black", fill = "#ABDEE6", alpha = 0.6, shape=21, size=2) + # SU colors
   # Check the 10 smallest values, otherwise it would be overloaded
   geom_segment(data = subset(fitted_values_df, abs(residuals) > 0.2), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
-  geom_smooth(method = "lm", se = FALSE, color = "#002F5F", linewidth = 1) +
+  geom_abline(slope = 1, intercept = 0, color = "#002F5F", linewidth = 1) +
   labs(
     x = "Fitted values",
     y = "Price",
