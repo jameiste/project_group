@@ -15,6 +15,7 @@
 *.tar.gz
 
 # Temporary files
+.DS_Store
 *.Rout
 *.Rout.save
 *.o
