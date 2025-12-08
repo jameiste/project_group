@@ -6,6 +6,7 @@
 # install.packages("glmnet")
 # install.packages("rpart")
 # install.packages("rpart.plot)
+# install.packages("gbm")
 
 library("xml2")
 library("jsonlite")
@@ -15,6 +16,8 @@ library("glue")
 library("glmnet")
 library("rpart")
 library("rpart.plot")
+library("gbm")
+
 # --- Load data  ---
 rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
   sep = ";",
@@ -40,13 +43,12 @@ rent_data[rent_data == ""] <- NA
 # Drop rows with NA (inspiration: https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame)
 rent_data <- rent_data[complete.cases(rent_data),]
 
-# who in the world uses feet
+# Who in the world uses feet
 rent_data$square_feet <- rent_data$square_feet * 0.3048^2
 names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
-
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
-regression_columns <- c("square_meter", "bedrooms", "bathrooms", "latitude", "state", "longitude")
+regression_columns <- c("square_meter", "bedrooms", "bathrooms", "state")
 # Numeric columns 
 numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms", "latitude", "longitude")
 rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
@@ -65,6 +67,9 @@ train_indices <- sample(1:amount_rows, round(amount_rows * ratio_train))
 # Divide data sets
 regression_data_train <- regression_data[train_indices,]
 regression_data_test <- regression_data[-train_indices, ]
+# States in both data sets
+train_states <- unique(regression_data_train$state)
+regression_data_test <- regression_data_test[regression_data_test$state %in% train_states, ]
 target_train <- regression_data[train_indices, target]
 target_test <- regression_data[-train_indices, target]
 # Re-scale the data
@@ -77,7 +82,7 @@ mean_std <- list(
 regression_data_train[, numeric_regression_cols] <- (regression_data_train[, numeric_regression_cols] - mean_std$mean) / mean_std$std
 regression_data_test[, numeric_regression_cols] <- (regression_data_test[, numeric_regression_cols] - mean_std$mean) / mean_std$std
 
-# Keep only those states that are in train (error at prediciton otherwise)
+# Keep only those states that are in train (error at prediction otherwise)
 train_states <- unique(regression_data_train$state)
 regression_data_train <- regression_data_train[regression_data_train$state %in% train_states, ]
 regression_data_test <- regression_data_test[regression_data_test$state %in% train_states, ]
@@ -136,8 +141,8 @@ print(plot_lm_parameter)
 
 # --- --- Ridge & Lasso regression --- ---
 # CV (Leave-one-out, nfold = amount of entries is leave one out cross validation (Lecture))
-cv_ridge <- cv.glmnet(regression_matrix, target_array, alpha = 0, nfolds = nrow(regression_matrix))
-cv_lasso <- cv.glmnet(regression_matrix, target_array, alpha = 1, nfolds = nrow(regression_matrix))
+cv_ridge <- cv.glmnet(regression_matrix, target_array, alpha = 0, nfolds = 5)
+cv_lasso <- cv.glmnet(regression_matrix, target_array, alpha = 1, nfolds = 5)
 min_lambda_ridge <- cv_ridge$lambda.min
 min_lambda_lasso <- cv_lasso$lambda.min
 
@@ -204,10 +209,26 @@ plot_tree <- rpart.plot(
 
 # Print and Store 
 print(plot_tree)
+
+# --- --- Boosting --- ---
+boosting <- gbm(
+  formula = log_price ~., 
+  data = data.frame( log_price = target_array, regression_matrix),
+  distribution = "gaussian", 
+  n.trees = 1000, 
+  interaction.depth = 4, 
+  shrinkage = 0.01, 
+  cv.folds = 5
+)
+best_trees <- gbm.perf(boosting, method='cv')
+
+test_gbm <- data.frame(log_price = regression_data_test$log_price, test_matrix)
+
 # --- --- Prediction Analysis --- ---
 prediction_linear <- as.matrix(predict(linear_regression, newdata = regression_data_test))
 prediction_ridge <- predict(ridge, s = min_lambda_ridge, newx = test_matrix)
 prediction_lasso <- predict(lasso, s = min_lambda_lasso, newx = test_matrix)
+prediction_boosting <- predict(boosting, newdata = data.frame(log_price = regression_data_test$log_price, test_matrix), n.trees = best_trees)
 
 # Compute metrics
 prediciton_comparison <- data.frame(
@@ -218,21 +239,19 @@ prediciton_comparison <- data.frame(
   MAPE = numeric(),
   stringsAsFactors = FALSE
 )
-predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge")
-test_price <- regression_data_test$price
+predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge", prediction_boosting = "boosting")
+test_price <- regression_data_test$log_price
 for (key in names(predicition_data_list)) {
   name <- predicition_data_list[[key]]
-  log_data <- get(key)
-  data <- exp(log_data)
+  data <- get(key)
   
   # Compute properties
   mse <- mean((data - test_price)^2)
   rmse <- round(sqrt(mse), 2)
-  mape <- round(mean(abs((data - test_price) / test_price)) * 100, 2)
+  mape <- round(mean(abs((exp(data) - exp(test_price)) / exp(test_price))) * 100, 2)
   rss <- sum((data - test_price)^2)
   
   # Add data
-  new_row <- list(model = name, MSE = mse, RMSE = rmse, MAPE = mape, RSS = rss)
+  new_row <- list(model = name, MSE = mse, RSS = rss, RMSE = rmse, MAPE = mape)
   prediciton_comparison[nrow(prediciton_comparison) + 1,] <- new_row
 }
-
