@@ -7,6 +7,7 @@
 # install.packages("rpart")
 # install.packages("rpart.plot)
 # install.packages("gbm")
+# install.packages("usmap")
 
 library("xml2")
 library("jsonlite")
@@ -17,6 +18,7 @@ library("glmnet")
 library("rpart")
 library("rpart.plot")
 library("gbm")
+library("usmap")
 
 # --- Load data  ---
 rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
@@ -69,7 +71,7 @@ names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 
 # Define the columns of interest
-regional_parameter <- "region" # Decide here on which variable it should rely
+regional_parameter <- "state" # Decide here on which variable it should rely
 target <- "log_price"
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
 # Numeric columns 
@@ -260,3 +262,64 @@ for (key in names(predicition_data_list)) {
   new_row <- list(model = name, MSE = mse, RSS = rss, RMSE = rmse, MAPE = mape)
   prediciton_comparison[nrow(prediciton_comparison) + 1,] <- new_row
 }
+
+# --- --- Map prediction for each state --- ---
+# Found at (https://jtr13.github.io/cc19/different-ways-of-plotting-u-s-map-in-r.html)
+states_in_model <- levels(regression_data_train[[regional_parameter]]) # Get states
+base_setting <- data.frame(
+  square_meter = 70,
+  bedrooms = 2,
+  bathrooms = 1,
+  target = 0,
+  dummy = states_in_model,
+  stringsAsFactors = FALSE
+)
+names(base_setting)[names(base_setting) == "dummy"] <- regional_parameter
+names(base_setting)[names(base_setting) == "target"] <- target
+# --- Prediction ---
+# Scale data
+prediction_numeric_cols <- names(base_setting)[sapply(base_setting, is.numeric)]
+base_setting[, prediction_numeric_cols] <- (base_setting[, prediction_numeric_cols] - mean_std$mean[prediction_numeric_cols]) / mean_std$std[prediction_numeric_cols]
+base_setting_matrix <- model.matrix(regression_formula, data = base_setting)[, -1]
+
+# Store prediction
+pred_lin_price <- exp(predict(linear_regression, newdata = base_setting))
+pred_ridge_price <- exp(predict(ridge, s = min_lambda_ridge, newx = base_setting_matrix))
+pred_lasso_price <- exp(predict(lasso, s = min_lambda_lasso, newx = base_setting_matrix))
+pred_boosting_price <- exp(predict(boosting, newdata = data.frame(log_price = 0, base_setting_matrix), n.trees = best_trees))
+
+# Map data
+state_data <- us_map(regions = "states")
+names(state_data)[names(state_data) == "abbr"] <- regional_parameter
+state_predictions <- data.frame(
+  state          = states_in_model,
+  price_linear   = pred_lin_price,
+  price_ridge    = pred_ridge_price,
+  price_lasso    = pred_lasso_price,
+  price_boosting = pred_boosting_price
+)
+state_predictions <- merge(state_predictions, state_data, by=regional_parameter)
+plot_price_method <- "price_linear"
+plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_price_method) +
+  scale_fill_continuous(
+    low = "white", high = "#002F5F",
+    name = "Predicted Rent",
+    labels = scales::comma
+  ) +
+  # geom_text(
+  #   data = state_predictions,
+  #   aes(x = x, y = y,
+  #       label = paste0(state, "\n$", round(plot_price_method, 0))),
+  #   size = 2.8, 
+  #   color = "black"
+  # ) +
+  labs(
+    title = glue("Predicted Rent by State ({plot_price_method}) "),
+    subtitle = "Setting: 70sqm, 2 bedrooms, 1 bathroom"
+  ) +
+  theme_minimal() +
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right")
+print(plot_region_prediction)
