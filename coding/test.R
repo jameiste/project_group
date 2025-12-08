@@ -56,6 +56,7 @@ rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
 )
 seed <- 2000
 set.seed(seed)
+
 # --- Prepare data for regression ---
 rent_data$log_price <- log(rent_data$price)
 rent_data[rent_data == "null"] <- NA
@@ -68,7 +69,7 @@ columns_of_interest <- c("price", "log_price", "square_feet", "bedrooms", "bathr
 rent_data <- rent_data[, columns_of_interest]
 
 
-# Predictors for regression
+# Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 regression_columns <- c("square_feet", "bedrooms", "bathrooms", "latitude", "state", "longitude")
 # Numeric columns 
 numeric_columns <- c("price", "log_price", "square_feet", "bedrooms", "bathrooms", "latitude", "longitude")
@@ -80,35 +81,60 @@ numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric
 # rent_data <- rent_data[!(rent_data$state == names(sort(table(rent_data$state)))[1]),] # kick out the state with least entries (dummy-variable trap)
 regression_data <- rent_data
 regression_data$state <- as.factor(regression_data$state)
-regression_data[, numeric_regression_cols] <- scale(regression_data[, numeric_regression_cols])
+
+# Split the data in test and training data
+ratio_train <- 0.8
+amount_rows <- nrow(regression_data)
+train_indices <- sample(1:amount_rows, round(amount_rows * ratio_train))
+# Divide data sets
+regression_data_train <- regression_data[train_indices,]
+regression_data_test <- regression_data[-train_indices, ]
+target_train <- regression_data[train_indices, target]
+target_test <- regression_data[-train_indices, target]
+# Re-scale the data
+mean_std <- list(
+  mean = sapply(regression_data_train[, numeric_regression_cols], mean),
+  std  = sapply(regression_data_train[, numeric_regression_cols], sd)
+) # List storing mean and std for standardization
+
+# Apply scaling on training and test data
+regression_data_train[, numeric_regression_cols] <- (regression_data_train[, numeric_regression_cols] - mean_std$mean) / mean_std$std
+regression_data_test[, numeric_regression_cols] <- (regression_data_test[, numeric_regression_cols] - mean_std$mean) / mean_std$std
+
+# Keep only those states that are in train (error at prediciton otherwise)
+train_states <- unique(regression_data_train$state)
+regression_data_train <- regression_data_train[regression_data_train$state %in% train_states, ]
+regression_data_test <- regression_data_test[regression_data_test$state %in% train_states, ]
 
 # Build regression formula
 regression_formula <- as.formula(glue("{target} ~ {paste(regression_columns, collapse = ' + ')}"))
 # Design matrix
-regression_matrix <- model.matrix(regression_formula, data = regression_data)[, -1]
-target_array <- as.numeric(regression_data[, target])
+regression_matrix <- model.matrix(regression_formula, data = regression_data_train)[, -1]
+test_matrix <- model.matrix(regression_formula, data = regression_data_test)[, -1]
+target_array <- as.numeric(target_train)
 
 # --- Linear regression ---
-linear_regression <- lm(regression_formula, data = regression_data)
+linear_regression <- lm(regression_formula, data = regression_data_train)
 coefficients_linear <- coef(linear_regression)
 linear_regression_coefficient <- data.frame(
   parameter = rownames(summary(linear_regression)$coefficients),
+  parameter_plot = gsub("^state", "", rownames(summary(linear_regression)$coefficients)),
   coefficient = summary(linear_regression)$coefficients[, "Estimate"],
   variance = summary(linear_regression)$coefficients[, "Std. Error"],
   row.names  = NULL
 )
 fitted_values_df <- data.frame(
-  actual = rent_data$price,
+  actual = exp(target_train),
   fitted = exp(predict(linear_regression)),
-  residuals = rent_data$log_price - (predict(linear_regression))
+  residuals = exp(target_train) - exp(predict(linear_regression))
 )
 # Plot results
 l_r_coef_inte <- linear_regression_coefficient[linear_regression_coefficient$parameter != "(Intercept)",] # Kick out the intercept
-plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter)) +
+plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter_plot)) +
   geom_point(aes(x = coefficient, color = "Coefficient"), size = 2) +
-  geom_errorbar(aes(x = coefficient, y = parameter, xmin = coefficient - variance, xmax = coefficient + variance),  color = "#6D6E71", width = 0.3, alpha = 0.5) +
+  geom_errorbar(aes(x = coefficient, y = parameter_plot, xmin = coefficient - variance, xmax = coefficient + variance),  color = "#6D6E71", width = 0.3, alpha = 0.5) +
   scale_color_manual( values = c("Coefficient"= "#002F5F" )) +
-  labs(x = "Value", y = "Paramter", color = "Regression") + theme_light() +
+  labs(x = "Value", y = "Parameter", color = "Regression") + theme_light() +
   theme(
     legend.position = c(0.85, 0.85),
     legend.background = element_rect(fill = "white", color = "black", linewidth = 0.1),
@@ -136,18 +162,21 @@ print(plot_lm_parameter)
 # CV (Leave-one-out, nfold = amount of entries is leave one out cross validation (Lecture))
 cv_ridge <- cv.glmnet(regression_matrix, target_array, alpha = 0, nfolds = nrow(regression_matrix))
 cv_lasso <- cv.glmnet(regression_matrix, target_array, alpha = 1, nfolds = nrow(regression_matrix))
+min_lambda_ridge <- cv_ridge$lambda.min
+min_lambda_lasso <- cv_lasso$lambda.min
 
 # Regression
-ridge <- glmnet(regression_matrix, target_array, alpha = 0, standardize = TRUE)
-lasso <- glmnet(regression_matrix, target_array, alpha = 1, standardize = TRUE)
+ridge <- glmnet(regression_matrix, target_array, alpha = 0, lambda = min_lambda_ridge)
+lasso <- glmnet(regression_matrix, target_array, alpha = 1, lambda = min_lambda_lasso)
 
 # Analyze regressions
 # Take the minimum for each ticker
-coef_ridge <- as.matrix(coef(cv_ridge, s = "lambda.min"))
-coef_lasso <- as.matrix(coef(cv_lasso, s = "lambda.min"))
+coef_ridge <- as.matrix(coef(ridge))
+coef_lasso <- as.matrix(coef(lasso))
 
 shrinkage_coef <- data.frame(
   parameter = rownames(coef_ridge),
+  parameter_plot = gsub("^state", "", rownames(coef_ridge)),
   coef_ridge = coef_ridge[, 1],
   coef_lasso = coef_lasso[, 1],
   row.names = NULL
@@ -155,7 +184,7 @@ shrinkage_coef <- data.frame(
 
 # Plot
 shrinkage_coef_plot <- shrinkage_coef[shrinkage_coef$parameter != "(Intercept)",]
-plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter)) +
+plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
   geom_point(aes(x = coef_ridge, color = "Ridge"), size = 2) +
   geom_point(aes(x = coef_lasso, color = "Lasso"), size = 2) +
   scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6")) +
@@ -167,3 +196,35 @@ plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter)) +
 
 #Print and store
 print(plot_mininimal_lambda)
+
+# --- Prediction Analysis ---
+prediction_linear <- as.matrix(predict(linear_regression, newdata = regression_data_test))
+prediction_ridge <- predict(ridge, s = min_lambda_ridge, newx = test_matrix)
+prediction_lasso <- predict(lasso, s = min_lambda_lasso, newx = test_matrix)
+
+# Compute metrics
+prediciton_comparison <- data.frame(
+  model = character(),
+  MSE = numeric(),
+  RSS = numeric(),
+  RMSE = numeric(),
+  MAPE = numeric(),
+  stringsAsFactors = FALSE
+)
+predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge")
+test_price <- regression_data_test$price
+for (key in names(predicition_data_list)) {
+  name <- predicition_data_list[[key]]
+  log_data <- get(key)
+  data <- exp(log_data)
+  
+  # Compute properties
+  mse <- mean((data - test_price)^2)
+  rmse <- round(sqrt(mse), 2)
+  mape <- round(mean(abs((data - test_price) / test_price)) * 100, 2)
+  rss <- sum((data - test_price)^2)
+  
+  # Add data
+  new_row <- list(model = name, MSE = mse, RMSE = rmse, MAPE = mape, RSS = rss)
+  prediciton_comparison[nrow(prediciton_comparison) + 1,] <- new_row
+}
