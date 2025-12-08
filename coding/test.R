@@ -3,12 +3,14 @@
 # install.packages("ggplot2")
 # install.packages("readxl")
 # install.packages("glue")
+# install.packages("glmnet")
 
 library("xml2")
 library("jsonlite")
 library("ggplot2")
 library("readxl")
 library("glue")
+library("glmnet")
 # Read the UCI dataset page
 # url_page <- "https://archive.ics.uci.edu/dataset/477/real+estate+valuation+data+set"
 # page <- read_html(url_page)
@@ -52,7 +54,8 @@ rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
   quote = "",
   fileEncoding = "latin1"
 )
-
+seed <- 2000
+set.seed(seed)
 # --- Prepare data for regression ---
 rent_data$log_price <- log(rent_data$price)
 rent_data[rent_data == "null"] <- NA
@@ -83,7 +86,7 @@ regression_data[, numeric_regression_cols] <- scale(regression_data[, numeric_re
 regression_formula <- as.formula(glue("{target} ~ {paste(regression_columns, collapse = ' + ')}"))
 # Design matrix
 regression_matrix <- model.matrix(regression_formula, data = regression_data)[, -1]
-target_data <- regression_data[, target]
+target_array <- as.numeric(regression_data[, target])
 
 # --- Linear regression ---
 linear_regression <- lm(regression_formula, data = regression_data)
@@ -114,7 +117,7 @@ plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter)) +
 plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
   geom_point(color = "black", fill = "#ABDEE6", alpha = 0.6, shape=21, size=2) + # SU colors
   # Check the 10 smallest values, otherwise it would be overloaded
-  geom_segment(data = subset(fitted_values_df, abs(residuals) > 0.2), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
+  geom_segment(data = subset(fitted_values_df, abs(residuals) > 0.3), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
   geom_abline(slope = 1, intercept = 0, color = "#002F5F", linewidth = 1) +
   labs(
     x = "Fitted values",
@@ -128,3 +131,39 @@ plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
 # Print and store
 print(plot_regression)
 print(plot_lm_parameter)
+
+# --- --- Ridge & Lasso regression --- ---
+# CV (Leave-one-out, nfold = amount of entries is leave one out cross validation (Lecture))
+cv_ridge <- cv.glmnet(regression_matrix, target_array, alpha = 0, nfolds = nrow(regression_matrix))
+cv_lasso <- cv.glmnet(regression_matrix, target_array, alpha = 1, nfolds = nrow(regression_matrix))
+
+# Regression
+ridge <- glmnet(regression_matrix, target_array, alpha = 0, standardize = TRUE)
+lasso <- glmnet(regression_matrix, target_array, alpha = 1, standardize = TRUE)
+
+# Analyze regressions
+# Take the minimum for each ticker
+coef_ridge <- as.matrix(coef(cv_ridge, s = "lambda.min"))
+coef_lasso <- as.matrix(coef(cv_lasso, s = "lambda.min"))
+
+shrinkage_coef <- data.frame(
+  parameter = rownames(coef_ridge),
+  coef_ridge = coef_ridge[, 1],
+  coef_lasso = coef_lasso[, 1],
+  row.names = NULL
+)
+
+# Plot
+shrinkage_coef_plot <- shrinkage_coef[shrinkage_coef$parameter != "(Intercept)",]
+plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter)) +
+  geom_point(aes(x = coef_ridge, color = "Ridge"), size = 2) +
+  geom_point(aes(x = coef_lasso, color = "Lasso"), size = 2) +
+  scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6")) +
+  labs(x = "Value", y = "Ticker", color = "Regression") + theme_light() +
+  theme(
+    legend.position = c(0.9, 0.85),
+    legend.background = element_rect(fill = "white", color = "black", linewidth = 0.1),
+    legend.title = element_text(size = 8, face = "bold"))
+
+#Print and store
+print(plot_mininimal_lambda)
