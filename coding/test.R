@@ -75,7 +75,7 @@ regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parame
 # Numeric columns 
 numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms")
 rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
-numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric)], setdiff(names(rent_data), regression_columns))
+numeric_regression_cols <- c(names(rent_data[, regression_columns])[sapply(rent_data[,regression_columns], is.numeric)], setdiff(names(rent_data[, numeric_columns]), regression_columns))
 
 # Handle state as categorical
 regression_data <- rent_data
