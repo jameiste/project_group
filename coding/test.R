@@ -4,6 +4,8 @@
 # install.packages("readxl")
 # install.packages("glue")
 # install.packages("glmnet")
+# install.packages("rpart")
+# install.packages("rpart.plot)
 
 library("xml2")
 library("jsonlite")
@@ -11,6 +13,8 @@ library("ggplot2")
 library("readxl")
 library("glue")
 library("glmnet")
+library("rpart")
+library("rpart.plot")
 # Read the UCI dataset page
 # url_page <- "https://archive.ics.uci.edu/dataset/477/real+estate+valuation+data+set"
 # page <- read_html(url_page)
@@ -57,16 +61,19 @@ rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
 seed <- 2000
 set.seed(seed)
 
+
+# Modify the data
+columns_of_interest <- c("price", "square_feet", "bedrooms", "bathrooms", "cityname", "state", "longitude", "latitude", "price_type")
+rent_data <- rent_data[, columns_of_interest]
+
 # --- Prepare data for regression ---
+# Some are weekly listed
+rent_data[grepl("Weekly", rent_data$price_type, fixed = TRUE), "price"] <- rent_data[grepl("Weekly", rent_data$price_type, fixed = TRUE), "price"] * 4
 rent_data$log_price <- log(rent_data$price)
 rent_data[rent_data == "null"] <- NA
 rent_data[rent_data == ""] <- NA
 # Drop rows with NA (inspiration: https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame)
 rent_data <- rent_data[complete.cases(rent_data),]
-
-# Modify the data
-columns_of_interest <- c("price", "log_price", "square_feet", "bedrooms", "bathrooms", "cityname", "state", "longitude", "latitude")
-rent_data <- rent_data[, columns_of_interest]
 
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
@@ -197,7 +204,38 @@ plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
 #Print and store
 print(plot_mininimal_lambda)
 
-# --- Prediction Analysis ---
+# --- --- Regression Tree --- ----
+# There are too many states, hence, separate them in 5 regions (https://www.jagranjosh.com/general-knowledge/regions-of-united-states-complete-list-history-and-importance-1721218579-1)
+northeast <- c("ME","NH","VT","MA","RI","CT","NY","PA","NJ")
+southeast <- c("DE","MD","DC","VA","WV","NC","SC","GA","FL","KY","TN","AL","MS","AR","LA")
+midwest <- c("OH","MI","IN","IL","WI","MN","IA","MO","ND","SD","NE","KS")
+southwest <- c("TX","OK","NM","AZ")
+west <- c("CA","NV","UT","CO","WY","MT","ID","OR","WA","AK","HI") 
+regression_data$region <- "Other"
+region_list = c("Northeast", "Southeast","Midwest", "Southwest", "West")
+# Apply the mapping
+for (region in region_list) {
+  list <- get(tolower(region))
+  regression_data[regression_data$state %in% list, "region"] <- region
+}
+
+# Tree
+tree_columns <- c("square_feet", "bedrooms", "bathrooms", "region")
+tree_formula <- as.formula(glue("price ~ {paste(tree_columns, collapse = ' + ')}"))
+regression_tree <- rpart(tree_formula, data = regression_data)
+
+# Plot
+plot_tree <- rpart.plot(
+  regression_tree,
+  type = 3,
+  extra = 101,
+  fallen.leaves = TRUE,
+ cex = 0.6 
+)
+
+# Print and Store 
+print(plot_tree)
+# --- --- Prediction Analysis --- ---
 prediction_linear <- as.matrix(predict(linear_regression, newdata = regression_data_test))
 prediction_ridge <- predict(ridge, s = min_lambda_ridge, newx = test_matrix)
 prediction_lasso <- predict(lasso, s = min_lambda_lasso, newx = test_matrix)
@@ -228,3 +266,4 @@ for (key in names(predicition_data_list)) {
   new_row <- list(model = name, MSE = mse, RMSE = rmse, MAPE = mape, RSS = rss)
   prediciton_comparison[nrow(prediciton_comparison) + 1,] <- new_row
 }
+
