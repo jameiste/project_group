@@ -15,41 +15,6 @@ library("glue")
 library("glmnet")
 library("rpart")
 library("rpart.plot")
-# Read the UCI dataset page
-# url_page <- "https://archive.ics.uci.edu/dataset/477/real+estate+valuation+data+set"
-# page <- read_html(url_page)
-
-# links <- xml_find_all(page, ".//a")
-# hrefs <- xml_attr(links, "href")
-
-# # Pick the first link ending with ".data"
-# idx <- grep("\\.zip$", hrefs)
-# if (length(idx) == 0) stop("No .data link found.")
-# zip_href <- hrefs[idx[1]]
-
-# # Full URL
-# base <- "https://archive.ics.uci.edu"
-# if (!grepl("^https?://", zip_href)) {
-#   data_url <- paste0(base, zip_href)
-# } else {
-#   data_url <- zip_href
-# }
-# # Download zip
-# tmp <- tempfile(fileext = ".zip") # temporary store
-# download.file(data_url, tmp, mode = "wb")
-# files <- unzip(tmp, list = TRUE,)
-
-# # Get data
-# unzip(tmp, exdir = tempdir())
-# data_path <- file.path(tempdir(), files$Name[1])
-# suffix <- tools::file_ext(data_path)
-# if (suffix == "xlsx") {
-#   real_estate <- data.frame(read_excel(data_path))
-# } else if (suffix == "csv") {
-#   real_estate <- read.csv(data_path)
-# }
-# head(df)
-
 # --- Load data  ---
 rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
   sep = ";",
@@ -75,11 +40,15 @@ rent_data[rent_data == ""] <- NA
 # Drop rows with NA (inspiration: https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame)
 rent_data <- rent_data[complete.cases(rent_data),]
 
+# who in the world uses feet
+rent_data$square_feet <- rent_data$square_feet * 0.3048^2
+names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
+
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
-regression_columns <- c("square_feet", "bedrooms", "bathrooms", "latitude", "state", "longitude")
+regression_columns <- c("square_meter", "bedrooms", "bathrooms", "latitude", "state", "longitude")
 # Numeric columns 
-numeric_columns <- c("price", "log_price", "square_feet", "bedrooms", "bathrooms", "latitude", "longitude")
+numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms", "latitude", "longitude")
 rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
 target <- "log_price"
 numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric)],c(target, "price"))
@@ -220,7 +189,7 @@ for (region in region_list) {
 }
 
 # Tree
-tree_columns <- c("square_feet", "bedrooms", "bathrooms", "region")
+tree_columns <- c("square_meter", "bedrooms", "bathrooms", "region")
 tree_formula <- as.formula(glue("price ~ {paste(tree_columns, collapse = ' + ')}"))
 regression_tree <- rpart(tree_formula, data = regression_data)
 
