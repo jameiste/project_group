@@ -43,55 +43,74 @@ rent_data[rent_data == ""] <- NA
 # Drop rows with NA (inspiration: https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame)
 rent_data <- rent_data[complete.cases(rent_data),]
 
+# Cut outliers
+rent_data <- rent_data[(rent_data$price <= quantile(rent_data$price, 0.95)) & (rent_data$price >= quantile(rent_data$price, 0.01)), ]
+
+# There are too many states, hence, separate them in 5 regions (https://www.jagranjosh.com/general-knowledge/regions-of-united-states-complete-list-history-and-importance-1721218579-1)
+northeast <- c("ME","NH","VT","MA","RI","CT","NY","PA","NJ")
+southeast <- c("DE","MD","DC","VA","WV","NC","SC","GA","FL","KY","TN","AL","MS","AR","LA")
+midwest <- c("OH","MI","IN","IL","WI","MN","IA","MO","ND","SD","NE","KS")
+southwest <- c("TX","OK","NM","AZ")
+west <- c("CA","NV","UT","CO","WY","MT","ID","OR","WA","AK","HI") 
+rent_data$region <- "Other"
+region_list = c("Northeast", "Southeast","Midwest", "Southwest", "West")
+# Apply the mapping
+for (region in region_list) {
+  list <- get(tolower(region))
+  rent_data[rent_data$state %in% list, "region"] <- region
+}
+
 # Who in the world uses feet
 rent_data$square_feet <- rent_data$square_feet * 0.3048^2
 names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
-
+# rent_data[, "latitude_sq"] <- as.numeric(rent_data$latitude)^2
+# rent_data[, "longitude_sq"] <- as.numeric(rent_data$longitude)^2
+# rent_data[, "lon_lat"] <- as.numeric(rent_data$latitude) * as.numeric(rent_data$longitude)
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
-regression_columns <- c("square_meter", "bedrooms", "bathrooms", "state")
-# Numeric columns 
-numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms", "latitude", "longitude")
-rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
+
+# Define the columns of interest
+regional_parameter <- "region" # Decide here on which variable it should rely
 target <- "log_price"
-numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric)],c(target, "price"))
+regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
+# Numeric columns 
+numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms")
+rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
+numeric_regression_cols <- setdiff(names(rent_data)[sapply(rent_data, is.numeric)], setdiff(names(rent_data), regression_columns))
 
 # Handle state as categorical
-# rent_data <- rent_data[!(rent_data$state == names(sort(table(rent_data$state)))[1]),] # kick out the state with least entries (dummy-variable trap)
 regression_data <- rent_data
-regression_data$state <- as.factor(regression_data$state)
+regression_data[, regional_parameter] <- as.factor(regression_data[, regional_parameter])
 
 # Split the data in test and training data
 ratio_train <- 0.8
 amount_rows <- nrow(regression_data)
 train_indices <- sample(1:amount_rows, round(amount_rows * ratio_train))
+
 # Divide data sets
 regression_data_train <- regression_data[train_indices,]
 regression_data_test <- regression_data[-train_indices, ]
-# States in both data sets
+# Keep only those states that are in train (error at prediction otherwise)
 train_states <- unique(regression_data_train$state)
 regression_data_test <- regression_data_test[regression_data_test$state %in% train_states, ]
 target_train <- regression_data[train_indices, target]
 target_test <- regression_data[-train_indices, target]
+
 # Re-scale the data
 mean_std <- list(
   mean = sapply(regression_data_train[, numeric_regression_cols], mean),
   std  = sapply(regression_data_train[, numeric_regression_cols], sd)
 ) # List storing mean and std for standardization
-
+regression_data_train_scale <- regression_data_train
+regression_data_test_scale <- regression_data_test
 # Apply scaling on training and test data
-regression_data_train[, numeric_regression_cols] <- (regression_data_train[, numeric_regression_cols] - mean_std$mean) / mean_std$std
-regression_data_test[, numeric_regression_cols] <- (regression_data_test[, numeric_regression_cols] - mean_std$mean) / mean_std$std
-
-# Keep only those states that are in train (error at prediction otherwise)
-train_states <- unique(regression_data_train$state)
-regression_data_train <- regression_data_train[regression_data_train$state %in% train_states, ]
-regression_data_test <- regression_data_test[regression_data_test$state %in% train_states, ]
+regression_data_train_scale[, numeric_regression_cols] <- (regression_data_train[, numeric_regression_cols] - mean_std$mean) / mean_std$std
+regression_data_test_scale[, numeric_regression_cols] <- (regression_data_test[, numeric_regression_cols] - mean_std$mean) / mean_std$std
 
 # Build regression formula
 regression_formula <- as.formula(glue("{target} ~ {paste(regression_columns, collapse = ' + ')}"))
 # Design matrix
-regression_matrix <- model.matrix(regression_formula, data = regression_data_train)[, -1]
-test_matrix <- model.matrix(regression_formula, data = regression_data_test)[, -1]
+regression_matrix <- model.matrix(regression_formula, data = regression_data_train_scale)[, -1]
+test_matrix <- model.matrix(regression_formula, data = regression_data_test_scale)[, -1]
 target_array <- as.numeric(target_train)
 
 # --- Linear regression ---
@@ -179,20 +198,6 @@ plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
 print(plot_mininimal_lambda)
 
 # --- --- Regression Tree --- ----
-# There are too many states, hence, separate them in 5 regions (https://www.jagranjosh.com/general-knowledge/regions-of-united-states-complete-list-history-and-importance-1721218579-1)
-northeast <- c("ME","NH","VT","MA","RI","CT","NY","PA","NJ")
-southeast <- c("DE","MD","DC","VA","WV","NC","SC","GA","FL","KY","TN","AL","MS","AR","LA")
-midwest <- c("OH","MI","IN","IL","WI","MN","IA","MO","ND","SD","NE","KS")
-southwest <- c("TX","OK","NM","AZ")
-west <- c("CA","NV","UT","CO","WY","MT","ID","OR","WA","AK","HI") 
-regression_data$region <- "Other"
-region_list = c("Northeast", "Southeast","Midwest", "Southwest", "West")
-# Apply the mapping
-for (region in region_list) {
-  list <- get(tolower(region))
-  regression_data[regression_data$state %in% list, "region"] <- region
-}
-
 # Tree
 tree_columns <- c("square_meter", "bedrooms", "bathrooms", "region")
 tree_formula <- as.formula(glue("price ~ {paste(tree_columns, collapse = ' + ')}"))
@@ -240,7 +245,7 @@ prediciton_comparison <- data.frame(
   stringsAsFactors = FALSE
 )
 predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge", prediction_boosting = "boosting")
-test_price <- regression_data_test$log_price
+test_price <- regression_data_test[, target]
 for (key in names(predicition_data_list)) {
   name <- predicition_data_list[[key]]
   data <- get(key)
