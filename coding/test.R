@@ -192,11 +192,61 @@ min_lambda_ridge <- cv_ridge$lambda.min
 min_lambda_lasso <- cv_lasso$lambda.min
 
 # Regression
+ridge_all <- glmnet(regression_matrix, target_array, alpha = 0) 
+lasso_all <- glmnet(regression_matrix, target_array, alpha = 1) 
 ridge <- glmnet(regression_matrix, target_array, alpha = 0, lambda = min_lambda_ridge)
 lasso <- glmnet(regression_matrix, target_array, alpha = 1, lambda = min_lambda_lasso)
 
+# --- Plot regression ---
+ridge_long <- cbind.data.frame(
+  parameter = rep(rownames(ridge_all$beta), ncol(ridge_all$beta)),
+  lambda = rep(ridge_all$lambda, each = length(rownames(ridge_all$beta))),
+  coefficient = as.vector(ridge_all$beta),
+  # Cut those that are significant small for the plot
+  coefficient_plot = as.vector(ifelse(abs(ridge_all$beta) > 1e-4, ridge_all$beta, NaN))
+)
+lasso_long <- cbind.data.frame(
+  parameter = rep(rownames(lasso_all$beta), ncol(lasso_all$beta)),
+  lambda = rep(lasso_all$lambda, each = length(rownames(ridge_all$beta))),
+  coefficient = as.vector(lasso_all$beta),
+  # Cut those that are significant small for the plot
+  coefficient_plot = as.vector(ifelse(abs(lasso_all$beta) > 1e-4, lasso_all$beta, NaN))
+)
+# Loop through both regressions
+for (regression in c("Ridge", "Lasso")) {
+  
+  data <- get(glue("{tolower(regression)}_long"))
+  # Color palette for plotting
+  palette <- colorRampPalette(c("#84994F","#FFE797","#FCB53B","#A72703"))(length(rownames(ridge_all$beta))) # my favorite palette : https://colorhunt.co/palette/84994fffe797fcb53ba72703
+  
+  
+  # --- Plot regression ---
+  plot_regression_fit <- ggplot(data, aes(x = log(lambda), y = coefficient_plot)) +
+    geom_line(aes(color = parameter), linewidth = 0.5) +
+    geom_point(aes(color = parameter), size = 0.6) +
+    geom_vline(aes(xintercept = log(min(lambda))), color =  "#002F5F", linetype = "dashed") +
+    geom_text(aes(x = log(min(lambda)) + 0.01*abs(log(min(lambda))), y = max(coefficient) + 0.1 * max(coefficient), label = "Min Lambda"), size = 3) +
+    scale_color_manual(values = c(palette)) +
+    labs(
+      x = "log(Lambda)",
+      y = "Coefficient", 
+      title = glue("Coefficients of the {regression} regression"),
+      color = "OMX 30 Stockholm"
+    ) +
+    theme_light() +
+    # Legend spacing from: https://www.statology.org/ggplot2-legend-size/
+    theme(legend.position =  "right", legend.box.just = "center",
+          legend.key.size = unit(0.15, 'cm'), legend.key.height = unit(0.15, 'cm'), legend.key.width = unit(0.15, 'cm'),
+          legend.background = element_rect(fill="transparent", color="black", linewidth=0.1), legend.text  = element_text(size = 7),
+          legend.title = element_text(size = 7, face = "bold"))+
+    guides(color = guide_legend(title.position = "top", ncol = 1))
+  
+  # Print and store
+  print(plot_regression_fit)
+  save_figure(glue("plot_{regression}_fit"), plot_regression_fit)
+}
+
 # Analyze regressions
-# Take the minimum for each ticker
 coef_ridge <- as.matrix(coef(ridge))
 coef_lasso <- as.matrix(coef(lasso))
 
@@ -214,7 +264,7 @@ plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
   geom_point(aes(x = coef_ridge, color = "Ridge"), size = 2) +
   geom_point(aes(x = coef_lasso, color = "Lasso"), size = 2) +
   scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6")) +
-  labs(x = "Value", y = "Ticker", color = "Regression") + theme_light() +
+  labs(x = "Value", y = "Parameter", color = "Regression") + theme_light() +
   theme(
     legend.position = c(0.9, 0.85),
     legend.background = element_rect(fill = "white", color = "black", linewidth = 0.1),
@@ -241,6 +291,7 @@ plot_tree <- rpart.plot(
 
 # Print and Store 
 print(plot_tree)
+# save_figure("plot_tree", plot_tree)
 
 # --- --- Boosting --- ---
 boosting <- gbm(
@@ -357,7 +408,7 @@ plot_table_small_states <- ggplot() + annotation_custom(small_states) + theme_mi
 plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_price_method) +
   scale_fill_continuous(
     low = "white", high = "#002F5F",
-    name = "Predicted Rent"
+    name = "Predicted Rent in $"
   ) +
   (if (regional_parameter == "state") {
   geom_text(
@@ -367,7 +418,7 @@ plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_pri
     size = 1.5, color = "#3A3A3A"
     )}  else {NULL}) + 
   labs(
-    title = glue("Predicted Rent by State ({plot_price_method}) "),
+    title = glue("Predicted Rent by {regional_parameter} ({plot_price_method}) in $"),
     subtitle = "Setting: 70sqm, 2 bedrooms, 1 bathroom"
   ) +
   theme_minimal() +
