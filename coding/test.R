@@ -24,6 +24,17 @@ library("usmap")
 library("sf")
 library("gridExtra")
 
+# Function: Save a graph
+save_figure <- function(name, plot, width = 7, height = 5, dpi = 300) {
+  ggsave(
+    filename = glue("images/", name, ".png"),
+    plot = plot,
+    width = width,
+    height = height,
+    dpi = dpi,
+    bg = "transparent"
+  )
+}
 # --- Load data  ---
 rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
   sep = ";",
@@ -170,6 +181,8 @@ plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
 # Print and store
 print(plot_regression)
 print(plot_lm_parameter)
+save_figure("plot_lm_parameter", plot_lm_parameter)
+save_figure("plot_regression", plot_regression)
 
 # --- --- Ridge & Lasso regression --- ---
 # CV (Leave-one-out, nfold = amount of entries is leave one out cross validation (Lecture))
@@ -209,6 +222,7 @@ plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
 
 #Print and store
 print(plot_mininimal_lambda)
+save_figure("plot_mininimal_lambda", plot_mininimal_lambda)
 
 # --- --- Regression Tree --- ----
 # Tree
@@ -370,3 +384,4 @@ plot_region_table <- grid.arrange(
 )
 
 print(plot_region_table)
+save_figure(glue("plot_{regional_parameter}_table"), plot_region_table)

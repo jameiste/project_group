@@ -39,3 +39,6 @@ cache/
 
 # Python virtual env (in case you mix Python)
 venv/
+
+# Images
+*.png
