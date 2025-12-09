@@ -54,10 +54,20 @@ southeast <- c("DE","MD","DC","VA","WV","NC","SC","GA","FL","KY","TN","AL","MS",
 midwest <- c("OH","MI","IN","IL","WI","MN","IA","MO","ND","SD","NE","KS")
 southwest <- c("TX","OK","NM","AZ")
 west <- c("CA","NV","UT","CO","WY","MT","ID","OR","WA","AK","HI") 
+state_region_map <- data.frame(
+  state  = c(northeast, southeast, midwest, southwest, west),
+  region = c(
+    rep("Northeast", length(northeast)),
+    rep("Southeast", length(southeast)),
+    rep("Midwest",   length(midwest)),
+    rep("Southwest", length(southwest)),
+    rep("West",      length(west))
+  ),
+  stringsAsFactors = FALSE
+)
 rent_data$region <- "Other"
-region_list = c("Northeast", "Southeast","Midwest", "Southwest", "West")
 # Apply the mapping
-for (region in region_list) {
+for (region in unique(state_region_map$region)) {
   list <- get(tolower(region))
   rent_data[rent_data$state %in% list, "region"] <- region
 }
@@ -71,7 +81,7 @@ names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 
 # Define the columns of interest
-regional_parameter <- "state" # Decide here on which variable it should rely
+regional_parameter <- "region" # Decide here on which variable it should rely
 target <- "log_price"
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
 # Numeric columns 
@@ -278,9 +288,10 @@ names(base_setting)[names(base_setting) == "dummy"] <- regional_parameter
 names(base_setting)[names(base_setting) == "target"] <- target
 # --- Prediction ---
 # Scale data
-prediction_numeric_cols <- names(base_setting)[sapply(base_setting, is.numeric)]
-base_setting[, prediction_numeric_cols] <- (base_setting[, prediction_numeric_cols] - mean_std$mean[prediction_numeric_cols]) / mean_std$std[prediction_numeric_cols]
-base_setting_matrix <- model.matrix(regression_formula, data = base_setting)[, -1]
+base_setting_scaled <- base_setting
+prediction_numeric_cols <- setdiff(names(base_setting)[sapply(base_setting, is.numeric)], target)
+base_setting_scaled[, prediction_numeric_cols] <- (base_setting[, prediction_numeric_cols] - mean(mean_std$mean[prediction_numeric_cols])) / mean(mean_std$std[prediction_numeric_cols])
+base_setting_matrix <- model.matrix(regression_formula, data = base_setting_scaled)[, -1]
 
 # Store prediction
 pred_lin_price <- exp(predict(linear_regression, newdata = base_setting))
@@ -290,17 +301,20 @@ pred_boosting_price <- exp(predict(boosting, newdata = data.frame(log_price = 0,
 
 # Map data
 state_data <- us_map(regions = "states")
-names(state_data)[names(state_data) == "abbr"] <- regional_parameter
+names(state_data)[names(state_data) == "abbr"] <- "state"
 state_predictions <- data.frame(
-  state          = states_in_model,
-  price_linear   = pred_lin_price,
-  price_ridge    = pred_ridge_price,
-  price_lasso    = pred_lasso_price,
+  dummy = states_in_model,
+  price_linear = pred_lin_price,
+  price_ridge = pred_ridge_price,
+  price_lasso = pred_lasso_price,
   price_boosting = pred_boosting_price
 )
-state_predictions <- merge(state_predictions, state_data, by=regional_parameter)
+names(state_predictions)[names(state_predictions) == "dummy"] <- regional_parameter
+if (regional_parameter == "region") {
+  state_predictions <- merge(state_region_map, state_predictions, by = regional_parameter)
+} else if (regional_parameter == "state") {state_predictions <- merge(state_predictions, state_data, by = regional_parameter)}
 plot_price_method <- "price_linear"
-plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_price_method) +
+plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_price_method, labels = TRUE) +
   scale_fill_continuous(
     low = "white", high = "#002F5F",
     name = "Predicted Rent",
@@ -321,5 +335,5 @@ plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_pri
   theme(axis.text = element_blank(),
         axis.title = element_blank(),
         panel.grid = element_blank(),
-        legend.position = "right")
+        legend.position = "bottom")
 print(plot_region_prediction)
