@@ -93,7 +93,7 @@ names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 # Define the columns of interest
-regional_parameter <- "state" # Decide here on which variable it should rely
+regional_parameter <- "region" # Decide here on which variable it should rely
 target <- "log_price"
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
 # Numeric columns 
@@ -317,7 +317,7 @@ prediction_lasso <- predict(lasso, s = min_lambda_lasso, newx = test_matrix)
 prediction_boosting <- predict(boosting, newdata = data.frame(log_price = regression_data_test$log_price, test_matrix), n.trees = best_trees)
 
 # Compute metrics
-prediciton_comparison <- data.frame(
+prediction_comparison <- data.frame(
   model = character(),
   MSE = numeric(),
   RSS = numeric(),
@@ -332,22 +332,29 @@ for (key in names(predicition_data_list)) {
   data <- get(key)
   
   # Compute properties
-  mse <- mean((data - test_price)^2)
+  mse <- round(mean((data - test_price)^2),4)
   rmse <- round(sqrt(mse), 2)
   mape <- if(target == "log_price") round(mean(abs((exp(data) - exp(test_price)) / exp(test_price))) * 100, 2)
   else round(mean(abs((data - test_price) / test_price)) * 100, 2)
-  rss <- sum((data - test_price)^2)
+  rss <- round(sum((data - test_price)^2), 2)
   
   # Add data
   new_row <- list(model = name, MSE = mse, RSS = rss, RMSE = rmse, MAPE = mape)
-  prediciton_comparison[nrow(prediciton_comparison) + 1,] <- new_row
+  prediction_comparison[nrow(prediction_comparison) + 1,] <- new_row
 }
-
+table_comparison <- tableGrob(
+  prediction_comparison,
+  rows = NULL,
+  theme = ttheme_default(
+    core = list(fg_params = list(cex = 0.7)),
+    colhead = list(fg_params = list(fontface = "bold", cex = 0.8))
+  ))
+save_figure("table_comparison", table_comparison)
 # --- --- Map prediction for each state --- ---
 # Found at (https://github.com/cran/usmap/blob/master/README.md)
 states_in_model <- levels(regression_data_train[[regional_parameter]]) # Get states
 base_setting <- data.frame(
-  square_meter = 70,
+  square_meter = 110,
   bedrooms = 2,
   bathrooms = 1,
   target = 0,
@@ -422,7 +429,7 @@ plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_pri
     )}  else {NULL}) + 
   labs(
     title = glue("Predicted Rent by {regional_parameter} ({plot_price_method}) in $"),
-    subtitle = "Setting: 70sqm, 2 bedrooms, 1 bathroom"
+    subtitle = glue("Setting: {base_setting$square_meter}sqm, {base_setting$bedrooms} bedrooms, {base_setting$bathrooms} bathroom")
   ) +
   theme_minimal() +
   theme(axis.text = element_blank(),
