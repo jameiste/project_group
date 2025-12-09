@@ -93,7 +93,7 @@ names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 # Define the columns of interest
-regional_parameter <- "region" # Decide here on which variable it should rely
+regional_parameter <- "state" # Decide here on which variable it should rely
 target <- "log_price"
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
 # Numeric columns 
@@ -324,12 +324,12 @@ state_data$x <- st_coordinates(state_data$center)[,1]
 state_data$y <- st_coordinates(state_data$center)[,2]
 
 # Make a list only containing big enough states
-large_states <- state_data$state[state_data$area >= 0.8 *mean(state_data$area)]
+large_states <- if (regional_parameter == "state") state_data$state[state_data$area >= 0.8 *mean(state_data$area)] else c()
 state_predictions <- data.frame(
   dummy = states_in_model,
   price_linear = round(pred_lin_price, 2),
-  price_ridge = round(pred_ridge_price, 2),
-  price_lasso = round(pred_lasso_price, 2),
+  price_ridge = as.numeric(round(pred_ridge_price, 2)),
+  price_lasso = as.numeric(round(pred_lasso_price, 2)),
   price_boosting = round(pred_boosting_price, 2)
 )
 names(state_predictions)[names(state_predictions) == "dummy"] <- regional_parameter
@@ -344,7 +344,7 @@ state_predictions <- sort_by.data.frame(
   state_predictions,
   state_predictions[, "area"], decreasing = FALSE)
 small_states_df <- state_predictions[!duplicated(state_predictions[[regional_parameter]]), ]
-small_states <- tableGrob(small_states_df[ -(small_states_df$state %in% large_states), c(regional_parameter, plot_price_method)],
+small_states <- tableGrob(small_states_df[ !(small_states_df$state %in% large_states), c(regional_parameter, plot_price_method)],
   rows = NULL,
   theme = ttheme_minimal(
     base_size = 5,
