@@ -167,7 +167,7 @@ plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter_plot)) +
 plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
   geom_point(color = "black", fill = "#ABDEE6", alpha = 0.6, shape=21, size=2) + # SU colors
   # Check the 10 smallest values, otherwise it would be overloaded
-  geom_segment(data = subset(fitted_values_df, abs(residuals) > 0.3), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
+  geom_segment(data = subset(fitted_values_df, abs(residuals) > 500), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
   geom_abline(slope = 1, intercept = 0, color = "#002F5F", linewidth = 1) +
   labs(
     x = "Fitted values",
@@ -212,6 +212,9 @@ lasso_long <- cbind.data.frame(
   # Cut those that are significant small for the plot
   coefficient_plot = as.vector(ifelse(abs(lasso_all$beta) > 1e-4, lasso_all$beta, NaN))
 )
+# --- Get Lasso subset ---
+subset_lasso <- lasso_long[(lasso_long$lambda == cv_lasso$lambda.1se) & (lasso_long$coefficient != 0), "parameter"]
+
 # Loop through both regressions
 for (regression in c("Ridge", "Lasso")) {
   
