@@ -434,7 +434,7 @@ small_states <- tableGrob(small_states_df[ !(small_states_df$state %in% large_st
   rows = NULL,
   theme = ttheme_minimal(
     base_size = 5,
-    core = list(bg_params = list(fill = c("white", "#ABDEE6"), col = NA), fg_params = list(col = "black", fontface = "plain")),
+    core = list(bg_params = list(fill = c("white", "#ABDEE6"), col = NA), fg_params = list(col = "black", fontface = "bold", fontsize = 6)),
     colhead = list(fg_params = list(col = "white", fontface = "bold"), bg_params = list(fill = "#002F5F"))
   ))
 # Add Table to ggplot (https://stackoverflow.com/questions/12318120/adding-table-within-the-plotting-region-of-a-ggplot-in-r)
@@ -448,10 +448,11 @@ plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_pri
   (if (regional_parameter == "state") {
   geom_text(
     data = state_predictions[state_predictions$state %in% large_states,],
-    aes(x = x, y = y,
-        label = paste0(state, "\n$", round(.data[[plot_price_method]], 0))),
-    size = 1.5, color = "#3A3A3A"
+    aes(x = x, y = y, label = paste0(state, "\n$", round(.data[[plot_price_method]], 0)),
+        color = ifelse(.data[[plot_price_method]] > 1500, "#f7f7f7", "#1A1A1A")),
+    size = 2, fontface= "bold"
     )}  else {NULL}) + 
+  scale_colour_identity(guide = "none") +
   labs(
     title = glue("Predicted Rent by {regional_parameter} ({plot_price_method}) in $"),
     subtitle = glue("Setting: {base_setting$square_meter}sqm, {base_setting$bedrooms} bedrooms, {base_setting$bathrooms} bathroom")
