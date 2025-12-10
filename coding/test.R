@@ -93,7 +93,7 @@ names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 # Define the columns of interest
-regional_parameter <- "region" # Decide here on which variable it should rely
+regional_parameter <- "state" # Decide here on which variable it should rely
 target <- "log_price"
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
 # Numeric columns 
@@ -212,8 +212,25 @@ lasso_long <- cbind.data.frame(
   # Cut those that are significant small for the plot
   coefficient_plot = as.vector(ifelse(abs(lasso_all$beta) > 1e-4, lasso_all$beta, NaN))
 )
-# --- Get Lasso subset ---
+# --- Get subsets ---
+lm_intercept <- lm(as.formula(paste(target, "~ 1")), data = regression_data_train) 
+step_forward <- step(
+  lm_intercept,
+  scope = list(lower = lm_intercept, upper = linear_regression),
+  direction = "forward",
+  trace = FALSE
+)
+step_backward <- step(linear_regression, direction = "backward", trace = FALSE)
+step_both <- step(
+  lm_intercept,
+  scope = list(lower = lm_intercept, upper = linear_regression),
+  direction = "both",
+  trace = FALSE
+)
+# Determine subsets
 subset_lasso <- lasso_long[(lasso_long$lambda == cv_lasso$lambda.1se) & (lasso_long$coefficient != 0), "parameter"]
+subset_forward <- names(coef(step_forward))[-1]
+subset_backward <- names(coef(step_backward))[-1]
 
 # Loop through both regressions
 for (regression in c("Ridge", "Lasso")) {
@@ -228,21 +245,22 @@ for (regression in c("Ridge", "Lasso")) {
     geom_line(aes(color = parameter), linewidth = 0.5) +
     geom_point(aes(color = parameter), size = 0.6) +
     geom_vline(aes(xintercept = log(min(lambda))), color =  "#002F5F", linetype = "dashed") +
-    geom_text(aes(x = log(min(lambda)) + 0.01*abs(log(min(lambda))), y = max(coefficient) + 0.1 * max(coefficient), label = "Min Lambda"), size = 3) +
+    geom_text(aes(x = log(min(lambda)) + 1, y = max(coefficient) + 0.1 * max(coefficient), label = "Min Lambda"), size = 3) +
     scale_color_manual(values = c(palette)) +
     labs(
       x = "log(Lambda)",
       y = "Coefficient", 
       title = glue("Coefficients of the {regression} regression"),
-      color = "OMX 30 Stockholm"
+      color = "Parameter"
     ) +
     theme_light() +
     # Legend spacing from: https://www.statology.org/ggplot2-legend-size/
-    theme(legend.position =  "right", legend.box.just = "center",
-          legend.key.size = unit(0.15, 'cm'), legend.key.height = unit(0.15, 'cm'), legend.key.width = unit(0.15, 'cm'),
+    theme(legend.position = "right", legend.box.just = "center",
+          legend.key.size = unit(0.01, 'pt'), legend.key.height = unit(0.01, 'pt'), legend.key.width = unit(0.01, 'pt'),
           legend.background = element_rect(fill="transparent", color="black", linewidth=0.1), legend.text  = element_text(size = 7),
-          legend.title = element_text(size = 7, face = "bold"))+
-    guides(color = guide_legend(title.position = "top", ncol = 1))
+          legend.title = element_text(size = 7, face = "bold", margin = margin(t=1)))+
+    guides(color = guide_legend(title.position = "top", ncol = 1, override.aes = list(size = 0.5)),
+           shape = guide_legend(override.aes = list(size = 0.01)))
   
   # Print and store
   print(plot_regression_fit)
@@ -265,13 +283,19 @@ shrinkage_coef <- data.frame(
 shrinkage_coef_plot <- shrinkage_coef[shrinkage_coef$parameter != "(Intercept)",]
 plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
   geom_point(aes(x = coef_ridge, color = "Ridge"), size = 2) +
-  geom_point(aes(x = coef_lasso, color = "Lasso"), size = 2) +
-  scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6")) +
-  labs(x = "Value", y = "Parameter", color = "Regression") + theme_light() +
+  geom_point(aes(x = coef_lasso, color = ifelse(parameter %in% subset_lasso, "Subset", "Lasso")), size = 2) +
+  geom_label(data = subset(shrinkage_coef_plot, subset = parameter %in% subset_lasso), 
+             aes(x = coef_lasso, y = parameter_plot, label = parameter_plot, color = "Subset"), 
+             nudge_y = -1.5, size = 2) +
+  coord_cartesian(clip = "off") +
+  scale_y_discrete(expand =  -0.4) +
+  scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6", "Subset" = "#6D6E71")) +
+  labs(x = "Value", y = "Ticker", color = "Regression") + theme_light() +
   theme(
     legend.position = c(0.9, 0.85),
     legend.background = element_rect(fill = "white", color = "black", linewidth = 0.1),
-    legend.title = element_text(size = 8, face = "bold"))
+    legend.title = element_text(size = 8, face = "bold"),
+    axis.text.y = element_text(colour = ifelse(shrinkage_coef_plot$parameter %in% subset_lasso, "#ABDEE6", "black")))
 
 #Print and store
 print(plot_mininimal_lambda)
@@ -315,6 +339,7 @@ prediction_linear <- as.matrix(predict(linear_regression, newdata = regression_d
 prediction_ridge <- predict(ridge, s = min_lambda_ridge, newx = test_matrix)
 prediction_lasso <- predict(lasso, s = min_lambda_lasso, newx = test_matrix)
 prediction_boosting <- predict(boosting, newdata = data.frame(log_price = regression_data_test$log_price, test_matrix), n.trees = best_trees)
+prediction_step_regression <- predict(step_both, newdata = regression_data_test)
 
 # Compute metrics
 prediction_comparison <- data.frame(
@@ -325,7 +350,7 @@ prediction_comparison <- data.frame(
   MAPE = numeric(),
   stringsAsFactors = FALSE
 )
-predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge", prediction_boosting = "boosting")
+predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge", prediction_boosting = "boosting", prediction_step_regression = "stepwise")
 test_price <- regression_data_test[, target]
 for (key in names(predicition_data_list)) {
   name <- predicition_data_list[[key]]
@@ -446,3 +471,9 @@ plot_region_table <- grid.arrange(
 
 print(plot_region_table)
 save_figure(glue("plot_{regional_parameter}_table"), plot_region_table)
+
+# --- Print subsets ---
+print("We obtain the following subsets by the analysis, as it is less to show which are not part, we do that instead")
+print(glue("Lasso:\n  [{paste(setdiff(lasso_long$parameter, subset_lasso), collapse = ', ')}]"))
+print(glue("Forward:\n  [{paste(setdiff(lasso_long$parameter, subset_forward), collapse = ', ')}]"))
+print(glue("Backward:\n  [{paste(setdiff(lasso_long$parameter, subset_backward), collapse = ', ')}]"))
