@@ -1,7 +1,4 @@
-# install.packages("xml2")
-# install.packages("jsonlite")
 # install.packages("ggplot2")
-# install.packages("readxl")
 # install.packages("glue")
 # install.packages("glmnet")
 # install.packages("rpart")
@@ -11,10 +8,7 @@
 # install.packages("sf")
 # install.packages("gridExtra")
 
-library("xml2")
-library("jsonlite")
 library("ggplot2")
-library("readxl")
 library("glue")
 library("glmnet")
 library("rpart")
@@ -24,7 +18,7 @@ library("usmap")
 library("sf")
 library("gridExtra")
 
-# Function: Save a graph
+# Function: Save a graph to a specified folder
 save_figure <- function(name, plot, width = 7, height = 5, dpi = 300) {
   ggsave(
     filename = glue("images/", name, ".png"),
@@ -35,32 +29,32 @@ save_figure <- function(name, plot, width = 7, height = 5, dpi = 300) {
     bg = "transparent"
   )
 }
-# --- Load data  ---
-rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv",
+# --- --- Load data  --- ---
+rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv", #if you have a differnt path, change it here
   sep = ";",
   header = TRUE,
   stringsAsFactors = FALSE,
   quote = "",
   fileEncoding = "latin1"
 )
+# Set a seed for reproducibility
 seed <- 2000
 set.seed(seed)
 
-
-# Modify the data
+# Determine which columns are of interest in the data set
 columns_of_interest <- c("price", "square_feet", "bedrooms", "bathrooms", "cityname", "state", "longitude", "latitude", "price_type")
 rent_data <- rent_data[, columns_of_interest]
 
 # --- Prepare data for regression ---
-# Some are weekly listed
-rent_data[grepl("Weekly", rent_data$price_type, fixed = TRUE), "price"] <- rent_data[grepl("Weekly", rent_data$price_type, fixed = TRUE), "price"] * 4
-rent_data$log_price <- log(rent_data$price)
+# Some are weekly listed, so multiple them, such they have the same basis
+rent_data[grepl("Weekly", rent_data$price_type, fixed = TRUE), "price"] <- rent_data[grepl("Weekly", rent_data$price_type, fixed = TRUE), "price"] * 4.3
+rent_data$log_price <- log(rent_data$price) # log rent for stability
 rent_data[rent_data == "null"] <- NA
 rent_data[rent_data == ""] <- NA
 # Drop rows with NA (inspiration: https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame)
 rent_data <- rent_data[complete.cases(rent_data),]
 
-# Cut outliers
+# Cut outlier (especially the top 5%)
 rent_data <- rent_data[(rent_data$price <= quantile(rent_data$price, 0.95)) & (rent_data$price >= quantile(rent_data$price, 0.01)), ]
 
 # There are too many states, hence, separate them in 5 regions (https://www.jagranjosh.com/general-knowledge/regions-of-united-states-complete-list-history-and-importance-1721218579-1)
@@ -69,7 +63,7 @@ southeast <- c("DE","MD","DC","VA","WV","NC","SC","GA","FL","KY","TN","AL","MS",
 midwest <- c("OH","MI","IN","IL","WI","MN","IA","MO","ND","SD","NE","KS")
 southwest <- c("TX","OK","NM","AZ")
 west <- c("CA","NV","UT","CO","WY","MT","ID","OR","WA","AK","HI") 
-state_region_map <- data.frame(
+state_region_map <- data.frame( # Map States also to the regions
   state  = c(northeast, southeast, midwest, southwest, west),
   region = c(
     rep("Northeast", length(northeast)),
@@ -80,22 +74,23 @@ state_region_map <- data.frame(
   ),
   stringsAsFactors = FALSE
 )
-rent_data$region <- "Other"
+# Add the mapping to the data set
+rent_data$region <- "Other" # dummy variable if we forget some
 # Apply the mapping
 for (region in unique(state_region_map$region)) {
   list <- get(tolower(region))
   rent_data[rent_data$state %in% list, "region"] <- region
 }
 
-# Who in the world uses feet
-rent_data$square_feet <- rent_data$square_feet * 0.3048^2
+# Who in the world uses feet (convert it to sqn)
+rent_data$square_feet <- rent_data$square_feet * 0.3048^2 # 1 ft = 0.3048m
 names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 # Define the columns of interest
-regional_parameter <- "state" # Decide here on which variable it should rely
-target <- "log_price"
-regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter)
+regional_parameter <- "state" # Decide whether we consider all states or just regions
+target <- "log_price" # Decide to stay with price or log(price)
+regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter) # Columns the regressions are built upon
 # Numeric columns 
 numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms")
 rent_data[numeric_columns] <- lapply(rent_data[numeric_columns], as.numeric)
@@ -108,9 +103,9 @@ regression_data[, regional_parameter] <- as.factor(regression_data[, regional_pa
 # Split the data in test and training data
 ratio_train <- 0.8
 amount_rows <- nrow(regression_data)
-train_indices <- sample(1:amount_rows, round(amount_rows * ratio_train))
+train_indices <- sample(1:amount_rows, round(amount_rows * ratio_train)) # Select rows at random
 
-# Divide data sets
+# Divide data sets into train and test data
 regression_data_train <- regression_data[train_indices,]
 regression_data_test <- regression_data[-train_indices, ]
 # Keep only those states that are in train (error at prediction otherwise)
@@ -119,14 +114,14 @@ regression_data_test <- regression_data_test[regression_data_test$state %in% tra
 target_train <- regression_data[train_indices, target]
 target_test <- regression_data[-train_indices, target]
 
-# Re-scale the data
+# Re-scale the data for lasso and ridge: (x-µ)/std
 mean_std <- list(
   mean = sapply(regression_data_train[, numeric_regression_cols], mean),
   std  = sapply(regression_data_train[, numeric_regression_cols], sd)
 ) # List storing mean and std for standardization
 regression_data_train_scale <- regression_data_train
 regression_data_test_scale <- regression_data_test
-# Apply scaling on training and test data
+# Apply scaling also on training and test data
 regression_data_train_scale[, numeric_regression_cols] <- (regression_data_train[, numeric_regression_cols] - mean_std$mean) / mean_std$std
 regression_data_test_scale[, numeric_regression_cols] <- (regression_data_test[, numeric_regression_cols] - mean_std$mean) / mean_std$std
 
@@ -137,9 +132,10 @@ regression_matrix <- model.matrix(regression_formula, data = regression_data_tra
 test_matrix <- model.matrix(regression_formula, data = regression_data_test_scale)[, -1]
 target_array <- as.numeric(target_train)
 
-# --- Linear regression ---
+# --- --- Linear regression --- ---
 linear_regression <- lm(regression_formula, data = regression_data_train)
 coefficients_linear <- coef(linear_regression)
+# Data frames storing important data
 linear_regression_coefficient <- data.frame(
   parameter = rownames(summary(linear_regression)$coefficients),
   parameter_plot = gsub("^state", "", rownames(summary(linear_regression)$coefficients)),
@@ -147,12 +143,12 @@ linear_regression_coefficient <- data.frame(
   variance = summary(linear_regression)$coefficients[, "Std. Error"],
   row.names  = NULL
 )
-fitted_values_df <- data.frame(
+fitted_values_df <- data.frame( # Regression data fitted to linear data
   actual = if (target == "log_price") exp(target_train) else target_train,
   fitted = if (target == "log_price") exp(predict(linear_regression)) else predict(linear_regression),
   residuals = if(target == "log_price") exp(target_train) - exp(predict(linear_regression)) else target_train - predict(linear_regression)
 )
-# Plot results
+# Plot (coefficients and fitted values)
 l_r_coef_inte <- linear_regression_coefficient[linear_regression_coefficient$parameter != "(Intercept)",] # Kick out the intercept
 plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter_plot)) +
   geom_point(aes(x = coefficient, color = "Coefficient"), size = 2) +
@@ -185,10 +181,10 @@ save_figure("plot_lm_parameter", plot_lm_parameter)
 save_figure("plot_regression", plot_regression)
 
 # --- --- Ridge & Lasso regression --- ---
-# CV (Leave-one-out, nfold = amount of entries is leave one out cross validation (Lecture))
+# Cross validation to determine minimal lambda
 cv_ridge <- cv.glmnet(regression_matrix, target_array, alpha = 0, nfolds = 5)
 cv_lasso <- cv.glmnet(regression_matrix, target_array, alpha = 1, nfolds = 5)
-min_lambda_ridge <- cv_ridge$lambda.min
+min_lambda_ridge <- cv_ridge$lambda.min # Minimal lambda
 min_lambda_lasso <- cv_lasso$lambda.min
 
 # Regression
@@ -197,7 +193,7 @@ lasso_all <- glmnet(regression_matrix, target_array, alpha = 1)
 ridge <- glmnet(regression_matrix, target_array, alpha = 0, lambda = min_lambda_ridge)
 lasso <- glmnet(regression_matrix, target_array, alpha = 1, lambda = min_lambda_lasso)
 
-# --- Plot regression ---
+# --- Plot (shrinking coefficients and coefficients themself) ---
 ridge_long <- cbind.data.frame(
   parameter = rep(rownames(ridge_all$beta), ncol(ridge_all$beta)),
   lambda = rep(ridge_all$lambda, each = length(rownames(ridge_all$beta))),
@@ -212,8 +208,8 @@ lasso_long <- cbind.data.frame(
   # Cut those that are significant small for the plot
   coefficient_plot = as.vector(ifelse(abs(lasso_all$beta) > 1e-4, lasso_all$beta, NaN))
 )
-# --- Get subsets ---
-lm_intercept <- lm(as.formula(paste(target, "~ 1")), data = regression_data_train) 
+# --- Get subsets by (backward, forward, lasso) ---
+lm_intercept <- lm(as.formula(paste(target, "~ 1")), data = regression_data_train)  # needed for forward steps (intercept beginning up to full model)
 step_forward <- step(
   lm_intercept,
   scope = list(lower = lm_intercept, upper = linear_regression),
@@ -228,11 +224,11 @@ step_both <- step(
   trace = FALSE
 )
 # Determine subsets
-subset_lasso <- lasso_long[(lasso_long$lambda == cv_lasso$lambda.1se) & (lasso_long$coefficient != 0), "parameter"]
+subset_lasso <- lasso_long[(lasso_long$lambda == cv_lasso$lambda.1se) & (lasso_long$coefficient != 0), "parameter"] # min_lambda would kick out all
 subset_forward <- names(coef(step_forward))[-1]
 subset_backward <- names(coef(step_backward))[-1]
 
-# Loop through both regressions
+#  --- Loop through both regressions (Plotting reasons) ---
 for (regression in c("Ridge", "Lasso")) {
   
   data <- get(glue("{tolower(regression)}_long"))
@@ -240,7 +236,7 @@ for (regression in c("Ridge", "Lasso")) {
   palette <- colorRampPalette(c("#84994F","#FFE797","#FCB53B","#A72703"))(length(rownames(ridge_all$beta))) # my favorite palette : https://colorhunt.co/palette/84994fffe797fcb53ba72703
   
   
-  # --- Plot regression ---
+  # --- Plot regression path ---
   plot_regression_fit <- ggplot(data, aes(x = log(lambda), y = coefficient_plot)) +
     geom_line(aes(color = parameter), linewidth = 0.5) +
     geom_point(aes(color = parameter), size = 0.6) +
@@ -271,7 +267,7 @@ for (regression in c("Ridge", "Lasso")) {
 coef_ridge <- as.matrix(coef(ridge))
 coef_lasso <- as.matrix(coef(lasso))
 
-shrinkage_coef <- data.frame(
+shrinkage_coef <- data.frame( # Look also at coefficients
   parameter = rownames(coef_ridge),
   parameter_plot = gsub("^state", "", rownames(coef_ridge)),
   coef_ridge = coef_ridge[, 1],
@@ -308,7 +304,7 @@ tree_formula <- as.formula(glue("price ~ {paste(tree_columns, collapse = ' + ')}
 regression_tree <- rpart(tree_formula, data = regression_data)
 
 # Plot
-plot_tree <- rpart.plot(
+plot_tree <- rpart.plot( # rpart suitable plotting option
   regression_tree,
   type = 3,
   extra = 101,
@@ -330,18 +326,23 @@ boosting <- gbm(
   shrinkage = 0.01, 
   cv.folds = 5
 )
+# Extract the best trees by cross validation
 best_trees <- gbm.perf(boosting, method='cv')
-
 test_gbm <- data.frame(log_price = regression_data_test$log_price, test_matrix)
 
-# --- --- Prediction Analysis --- ---
+# --- --- Prediction Analysis for all tools look at --- ---
 prediction_linear <- as.matrix(predict(linear_regression, newdata = regression_data_test))
 prediction_ridge <- predict(ridge, s = min_lambda_ridge, newx = test_matrix)
 prediction_lasso <- predict(lasso, s = min_lambda_lasso, newx = test_matrix)
 prediction_boosting <- predict(boosting, newdata = data.frame(log_price = regression_data_test$log_price, test_matrix), n.trees = best_trees)
 prediction_step_regression <- predict(step_both, newdata = regression_data_test)
+# tree is not really suitable here, as only few options are presented
 
-# Compute metrics
+# Also do the prediction based on the determined lasso subset
+lasso_subset_model <- glmnet(regression_matrix[, subset_lasso], target_array, alpha = 1) 
+prediction_lasso_subset <- predict(lasso_subset_model, s = min_lambda_lasso, newx = test_matrix[, subset_lasso])
+
+# Compute metrics of interest (MSE, RSS, MAPE,....)
 prediction_comparison <- data.frame(
   model = character(),
   MSE = numeric(),
@@ -350,7 +351,10 @@ prediction_comparison <- data.frame(
   MAPE = numeric(),
   stringsAsFactors = FALSE
 )
-predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", prediction_ridge = "ridge", prediction_boosting = "boosting", prediction_step_regression = "stepwise")
+# Go through all methods  to compute those metrics
+predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", 
+   prediction_ridge = "ridge", prediction_boosting = "boosting", 
+   prediction_step_regression = "stepwise", prediction_lasso_subset = "lasso (subset)")
 test_price <- regression_data_test[, target]
 for (key in names(predicition_data_list)) {
   name <- predicition_data_list[[key]]
@@ -389,17 +393,18 @@ base_setting <- data.frame(
 names(base_setting)[names(base_setting) == "dummy"] <- regional_parameter
 names(base_setting)[names(base_setting) == "target"] <- target
 # --- Prediction ---
-# Scale data
+# Scale data again by (x-µ/std)
 base_setting_scaled <- base_setting
 prediction_numeric_cols <- setdiff(names(base_setting)[sapply(base_setting, is.numeric)], target)
 base_setting_scaled[, prediction_numeric_cols] <- (base_setting[, prediction_numeric_cols] - mean(mean_std$mean[prediction_numeric_cols])) / mean(mean_std$std[prediction_numeric_cols])
 base_setting_matrix <- model.matrix(regression_formula, data = base_setting_scaled)[, -1]
 
-# Store prediction
+# Store prediction of all models (distinguish if log price or price is taken)
 pred_lin_price <- if (target == "log_price") exp(predict(linear_regression, newdata = base_setting)) else predict(linear_regression, newdata = base_setting)
 pred_ridge_price <- if (target == "log_price") exp(predict(ridge, s = min_lambda_ridge, newx = base_setting_matrix)) else predict(ridge, s = min_lambda_ridge, newx = base_setting_matrix)
 pred_lasso_price <- if (target == "log_price") exp(predict(lasso, s = min_lambda_lasso, newx = base_setting_matrix)) else predict(lasso, s = min_lambda_lasso, newx = base_setting_matrix)
 pred_boosting_price <- if (target == "log_price") exp(predict(boosting, newdata = data.frame(log_price = 0, base_setting_matrix), n.trees = best_trees)) else predict(boosting, newdata = data.frame(log_price = 0, base_setting_matrix), n.trees = best_trees)
+
 # Map data
 state_data <- st_as_sf(us_map(regions = "states"))
 names(state_data)[names(state_data) == "abbr"] <- "state"
@@ -430,12 +435,14 @@ state_predictions <- sort_by.data.frame(
   state_predictions,
   state_predictions[, "area"], decreasing = FALSE)
 small_states_df <- state_predictions[!duplicated(state_predictions[[regional_parameter]]), ]
-small_states <- tableGrob(small_states_df[ !(small_states_df$state %in% large_states), c(regional_parameter, plot_price_method)],
+table_small_states_df <- small_states_df[ !(small_states_df$state %in% large_states), c(regional_parameter, plot_price_method)]
+small_states <- tableGrob(table_small_states_df,
   rows = NULL,
   theme = ttheme_minimal(
-    base_size = 5,
-    core = list(bg_params = list(fill = c("white", "#ABDEE6"), col = NA), fg_params = list(col = "black", fontface = "bold", fontsize = 6)),
-    colhead = list(fg_params = list(col = "white", fontface = "bold"), bg_params = list(fill = "#002F5F"))
+    base_size = 5, 
+    core = list(bg_params = list(fill =ifelse(table_small_states_df[, plot_price_method] > 1500, "#002F5F", "white"), col = NA), 
+      fg_params = list(col = ifelse(table_small_states_df[, plot_price_method] > 1500, "#f7f7f7", "#1A1A1A"), fontface = "bold", fontsize = 6)),
+    colhead = list(fg_params = list(col = "black", fontface = "bold"), bg_params = list(fill = "#ABDEE6"))
   ))
 # Add Table to ggplot (https://stackoverflow.com/questions/12318120/adding-table-within-the-plotting-region-of-a-ggplot-in-r)
 plot_table_small_states <- ggplot() + annotation_custom(small_states) + theme_minimal() +
@@ -462,7 +469,7 @@ plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_pri
         axis.title = element_blank(),
         panel.grid = element_blank(),
         legend.position = "bottom", legend.title.position = "top",legend.key.width = unit(1, "null"))
-
+# Combine table and the plot
 plot_region_table <- grid.arrange(
   plot_region_prediction,
   plot_table_small_states,
