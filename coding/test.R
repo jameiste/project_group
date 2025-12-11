@@ -168,11 +168,11 @@ plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter_plot)) +
 plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
   geom_point(color = "black", fill = "#ABDEE6", alpha = 0.6, shape=21, size=2) + # SU colors
   # Check the 10 smallest values, otherwise it would be overloaded
-  geom_segment(data = subset(fitted_values_df, abs(residuals) > 1.2*mean(abs(residuals))), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
+  # geom_segment(data = subset(fitted_values_df, abs(residuals) > 1.2*mean(abs(residuals))), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
   geom_abline(slope = 1, intercept = 0, color = "#002F5F", linewidth = 1) +
   labs(
     x = "Fitted values",
-    y = target,
+    y = "Price",
     title = "Linear regression"
   ) +
   theme_minimal() +
@@ -313,14 +313,14 @@ plot_tree <- rpart.plot( # rpart suitable plotting option
   regression_tree,
   type = 3,
   extra = 101,
+  lwd = 3,
+  tweak = 0.8,
   fallen.leaves = TRUE,
- cex = 0.6 
+  cex = 0.9
 )
-
 # Print and Store 
 print(plot_tree)
 # save_figure("plot_tree", plot_tree)
-
 # --- --- Boosting --- ---
 boosting <- gbm(
   formula = log_price ~., 
