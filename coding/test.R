@@ -55,7 +55,7 @@ rent_data[rent_data == ""] <- NA
 rent_data <- rent_data[complete.cases(rent_data),]
 
 # Cut outlier (especially the top 5%)
-rent_data <- rent_data[(rent_data$price <= quantile(rent_data$price, 0.95)) & (rent_data$price >= quantile(rent_data$price, 0.01)), ]
+rent_data <- rent_data[(rent_data$price <= quantile(rent_data$price, 0.95)) & (rent_data$price >= quantile(rent_data$price, 0.05)), ]
 
 # There are too many states, hence, separate them in 5 regions (https://www.jagranjosh.com/general-knowledge/regions-of-united-states-complete-list-history-and-importance-1721218579-1)
 northeast <- c("ME","NH","VT","MA","RI","CT","NY","PA","NJ")
@@ -144,9 +144,14 @@ linear_regression_coefficient <- data.frame(
   row.names  = NULL
 )
 fitted_values_df <- data.frame( # Regression data fitted to linear data
+  actual = target_train,
+  fitted = predict(linear_regression),
+  residuals = target_train - predict(linear_regression)
+)
+fitted_values_df <- data.frame( # Regression data fitted to linear data
   actual = if (target == "log_price") exp(target_train) else target_train,
   fitted = if (target == "log_price") exp(predict(linear_regression)) else predict(linear_regression),
-  residuals = if(target == "log_price") exp(target_train) - exp(predict(linear_regression)) else target_train - predict(linear_regression)
+  residuals = if(target == "log_price") target_train - exp(predict(linear_regression)) else target_train - predict(linear_regression)
 )
 # Plot (coefficients and fitted values)
 l_r_coef_inte <- linear_regression_coefficient[linear_regression_coefficient$parameter != "(Intercept)",] # Kick out the intercept
@@ -163,11 +168,11 @@ plot_lm_parameter <- ggplot(l_r_coef_inte, aes(y = parameter_plot)) +
 plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
   geom_point(color = "black", fill = "#ABDEE6", alpha = 0.6, shape=21, size=2) + # SU colors
   # Check the 10 smallest values, otherwise it would be overloaded
-  geom_segment(data = subset(fitted_values_df, abs(residuals) > 500), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
+  geom_segment(data = subset(fitted_values_df, abs(residuals) > 1.2*mean(abs(residuals))), aes(xend = fitted, yend = fitted), color = "#b00020", alpha = 0.2) +
   geom_abline(slope = 1, intercept = 0, color = "#002F5F", linewidth = 1) +
   labs(
     x = "Fitted values",
-    y = "Price",
+    y = target,
     title = "Linear regression"
   ) +
   theme_minimal() +
