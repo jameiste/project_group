@@ -42,3 +42,6 @@ venv/
 
 # Images
 *.png
+
+# Folder
+talk

@@ -88,8 +88,8 @@ names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
 # Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
 # Define the columns of interest
-regional_parameter <- "state" # Decide whether we consider all states or just regions
-target <- "log_price" # Decide to stay with price or log(price)
+regional_parameter <- "region" # Decide whether we consider all states or just regions (region or state)
+target <- "log_price" # Decide to stay with (price or log(price))
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter) # Columns the regressions are built upon
 # Numeric columns 
 numeric_columns <- c("price", "log_price", "square_meter", "bedrooms", "bathrooms")
@@ -182,8 +182,8 @@ plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
 # Print and store
 print(plot_regression)
 print(plot_lm_parameter)
-save_figure("plot_lm_parameter", plot_lm_parameter)
-save_figure("plot_regression", plot_regression)
+save_figure(glue("plot_lm_parameter_{regional_parameter}"), plot_lm_parameter)
+save_figure(glue("plot_regression_{regional_parameter}"), plot_regression)
 
 # --- --- Ridge & Lasso regression --- ---
 # Cross validation to determine minimal lambda
@@ -265,7 +265,7 @@ for (regression in c("Ridge", "Lasso")) {
   
   # Print and store
   print(plot_regression_fit)
-  save_figure(glue("plot_{regression}_fit"), plot_regression_fit)
+  save_figure(glue("plot_{regression}_fit_{regional_parameter}"), plot_regression_fit)
 }
 
 # Analyze regressions
@@ -285,22 +285,22 @@ shrinkage_coef_plot <- shrinkage_coef[shrinkage_coef$parameter != "(Intercept)",
 plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
   geom_point(aes(x = coef_ridge, color = "Ridge"), size = 2) +
   geom_point(aes(x = coef_lasso, color = ifelse(parameter %in% subset_lasso, "Subset", "Lasso")), size = 2) +
-  geom_label(data = subset(shrinkage_coef_plot, subset = parameter %in% subset_lasso), 
-             aes(x = coef_lasso, y = parameter_plot, label = parameter_plot, color = "Subset"), 
-             nudge_y = -1.5, size = 2) +
+  # geom_label(data = subset(shrinkage_coef_plot, subset = parameter %in% subset_lasso), 
+  #            aes(x = coef_lasso, y = parameter_plot, label = parameter_plot, color = "Subset"), 
+  #            nudge_y = -1.5, size = 2) +
   coord_cartesian(clip = "off") +
   scale_y_discrete(expand =  -0.4) +
-  scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6", "Subset" = "#6D6E71")) +
+  scale_color_manual(values = c("Ridge" = "#002F5F", "Lasso" = "#ABDEE6", "Subset" = "#86878a")) +
   labs(x = "Value", y = "Ticker", color = "Regression") + theme_light() +
   theme(
     legend.position = c(0.9, 0.85),
     legend.background = element_rect(fill = "white", color = "black", linewidth = 0.1),
     legend.title = element_text(size = 8, face = "bold"),
-    axis.text.y = element_text(colour = ifelse(shrinkage_coef_plot$parameter %in% subset_lasso, "#ABDEE6", "black")))
+    axis.text.y = element_text(colour = ifelse(shrinkage_coef_plot$parameter %in% subset_lasso, "#86878a", "black")))
 
 #Print and store
 print(plot_mininimal_lambda)
-save_figure("plot_mininimal_lambda", plot_mininimal_lambda)
+save_figure(glue("plot_mininimal_lambda_{regional_parameter}"), plot_mininimal_lambda)
 
 # --- --- Regression Tree --- ----
 # Tree
@@ -359,7 +359,7 @@ prediction_comparison <- data.frame(
 # Go through all methods  to compute those metrics
 predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", 
    prediction_ridge = "ridge", prediction_boosting = "boosting", 
-   prediction_step_regression = "stepwise", prediction_lasso_subset = "lasso (subset)")
+   prediction_lasso_subset = "lasso (subset)")
 test_price <- regression_data_test[, target]
 for (key in names(predicition_data_list)) {
   name <- predicition_data_list[[key]]
@@ -383,7 +383,7 @@ table_comparison <- tableGrob(
     core = list(fg_params = list(cex = 0.7)),
     colhead = list(fg_params = list(fontface = "bold", cex = 0.8))
   ))
-save_figure("table_comparison", table_comparison)
+save_figure(glue("table_comparison_{regional_parameter}"), table_comparison)
 # --- --- Map prediction for each state --- ---
 # Found at (https://github.com/cran/usmap/blob/master/README.md)
 states_in_model <- levels(regression_data_train[[regional_parameter]]) # Get states
