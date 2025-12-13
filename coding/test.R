@@ -2,7 +2,7 @@
 # install.packages("glue")
 # install.packages("glmnet")
 # install.packages("rpart")
-# install.packages("rpart.plot)
+# install.packages("rpart.plot")
 # install.packages("gbm")
 # install.packages("usmap")
 # install.packages("sf")
@@ -18,24 +18,13 @@ library("usmap")
 library("sf")
 library("gridExtra")
 
-# Function: Save a graph to a specified folder
-save_figure <- function(name, plot, width = 7, height = 5, dpi = 300) {
-  ggsave(
-    filename = glue("images/", name, ".png"),
-    plot = plot,
-    width = width,
-    height = height,
-    dpi = dpi,
-    bg = "transparent"
-  )
-}
 # --- --- Load data  --- ---
-rent_data <- read.csv("data/apartments_for_rent_classified_10K.csv", #if you have a differnt path, change it here
-  sep = ";",
-  header = TRUE,
-  stringsAsFactors = FALSE,
-  quote = "",
-  fileEncoding = "latin1"
+rent_data <- read.csv("apartments_for_rent_classified_10K.csv", 
+                      sep = ";",
+                      header = TRUE,
+                      stringsAsFactors = FALSE,
+                      quote = "",
+                      fileEncoding = "latin1"
 )
 # Set a seed for reproducibility
 seed <- 2000
@@ -82,13 +71,13 @@ for (region in unique(state_region_map$region)) {
   rent_data[rent_data$state %in% list, "region"] <- region
 }
 
-# Who in the world uses feet (convert it to sqn)
+# Convert feet to sqm
 rent_data$square_feet <- rent_data$square_feet * 0.3048^2 # 1 ft = 0.3048m
 names(rent_data)[names(rent_data) == "square_feet"] <- "square_meter"
 
-# Predictors for regression (TODO: We could limit that to certain states, otherwise all 51)
+# Predictors for regression
 # Define the columns of interest
-regional_parameter <- "region" # Decide whether we consider all states or just regions (region or state)
+regional_parameter <- "state" # Decide whether we consider all states or just regions (region or state)
 target <- "log_price" # Decide to stay with (price or log(price))
 regression_columns <- c("square_meter", "bedrooms", "bathrooms", regional_parameter) # Columns the regressions are built upon
 # Numeric columns 
@@ -144,11 +133,6 @@ linear_regression_coefficient <- data.frame(
   row.names  = NULL
 )
 fitted_values_df <- data.frame( # Regression data fitted to linear data
-  actual = target_train,
-  fitted = predict(linear_regression),
-  residuals = target_train - predict(linear_regression)
-)
-fitted_values_df <- data.frame( # Regression data fitted to linear data
   actual = if (target == "log_price") exp(target_train) else target_train,
   fitted = if (target == "log_price") exp(predict(linear_regression)) else predict(linear_regression),
   residuals = if(target == "log_price") target_train - exp(predict(linear_regression)) else target_train - predict(linear_regression)
@@ -179,11 +163,9 @@ plot_regression <- ggplot(fitted_values_df, aes(x = fitted, y = actual)) +
   theme(legend.position =  "top",
         legend.background = element_rect(fill="transparent", color="black", linewidth=0.1),
         legend.title = element_blank())
-# Print and store
+# Print
 print(plot_regression)
 print(plot_lm_parameter)
-save_figure(glue("plot_lm_parameter_{regional_parameter}"), plot_lm_parameter)
-save_figure(glue("plot_regression_{regional_parameter}"), plot_regression)
 
 # --- --- Ridge & Lasso regression --- ---
 # Cross validation to determine minimal lambda
@@ -263,9 +245,8 @@ for (regression in c("Ridge", "Lasso")) {
     guides(color = guide_legend(title.position = "top", ncol = 1, override.aes = list(size = 0.5)),
            shape = guide_legend(override.aes = list(size = 0.01)))
   
-  # Print and store
+  # Print
   print(plot_regression_fit)
-  save_figure(glue("plot_{regression}_fit_{regional_parameter}"), plot_regression_fit)
 }
 
 # Analyze regressions
@@ -298,9 +279,8 @@ plot_mininimal_lambda <- ggplot(shrinkage_coef_plot, aes(y = parameter_plot)) +
     legend.title = element_text(size = 8, face = "bold"),
     axis.text.y = element_text(colour = ifelse(shrinkage_coef_plot$parameter %in% subset_lasso, "#86878a", "black")))
 
-#Print and store
+#Print
 print(plot_mininimal_lambda)
-save_figure(glue("plot_mininimal_lambda_{regional_parameter}"), plot_mininimal_lambda)
 
 # --- --- Regression Tree --- ----
 # Tree
@@ -318,9 +298,9 @@ plot_tree <- rpart.plot( # rpart suitable plotting option
   fallen.leaves = TRUE,
   cex = 0.9
 )
-# Print and Store 
+# Print
 print(plot_tree)
-# save_figure("plot_tree", plot_tree)
+
 # --- --- Boosting --- ---
 boosting <- gbm(
   formula = log_price ~., 
@@ -358,8 +338,8 @@ prediction_comparison <- data.frame(
 )
 # Go through all methods  to compute those metrics
 predicition_data_list <- c(prediction_linear = "linear", prediction_lasso = "lasso", 
-   prediction_ridge = "ridge", prediction_boosting = "boosting", 
-   prediction_lasso_subset = "lasso (subset)")
+                           prediction_ridge = "ridge", prediction_boosting = "boosting", 
+                           prediction_lasso_subset = "lasso (subset)")
 test_price <- regression_data_test[, target]
 for (key in names(predicition_data_list)) {
   name <- predicition_data_list[[key]]
@@ -383,7 +363,6 @@ table_comparison <- tableGrob(
     core = list(fg_params = list(cex = 0.7)),
     colhead = list(fg_params = list(fontface = "bold", cex = 0.8))
   ))
-save_figure(glue("table_comparison_{regional_parameter}"), table_comparison)
 # --- --- Map prediction for each state --- ---
 # Found at (https://github.com/cran/usmap/blob/master/README.md)
 states_in_model <- levels(regression_data_train[[regional_parameter]]) # Get states
@@ -442,13 +421,13 @@ state_predictions <- sort_by.data.frame(
 small_states_df <- state_predictions[!duplicated(state_predictions[[regional_parameter]]), ]
 table_small_states_df <- small_states_df[ !(small_states_df$state %in% large_states), c(regional_parameter, plot_price_method)]
 small_states <- tableGrob(table_small_states_df,
-  rows = NULL,
-  theme = ttheme_minimal(
-    base_size = 5, 
-    core = list(bg_params = list(fill =ifelse(table_small_states_df[, plot_price_method] > 1500, "#002F5F", "white"), col = NA), 
-      fg_params = list(col = ifelse(table_small_states_df[, plot_price_method] > 1500, "#f7f7f7", "#1A1A1A"), fontface = "bold", fontsize = 6)),
-    colhead = list(fg_params = list(col = "black", fontface = "bold"), bg_params = list(fill = "#ABDEE6"))
-  ))
+                          rows = NULL,
+                          theme = ttheme_minimal(
+                            base_size = 5, 
+                            core = list(bg_params = list(fill =ifelse(table_small_states_df[, plot_price_method] > 1500, "#002F5F", "white"), col = NA), 
+                                        fg_params = list(col = ifelse(table_small_states_df[, plot_price_method] > 1500, "#f7f7f7", "#1A1A1A"), fontface = "bold", fontsize = 6)),
+                            colhead = list(fg_params = list(col = "black", fontface = "bold"), bg_params = list(fill = "#ABDEE6"))
+                          ))
 # Add Table to ggplot (https://stackoverflow.com/questions/12318120/adding-table-within-the-plotting-region-of-a-ggplot-in-r)
 plot_table_small_states <- ggplot() + annotation_custom(small_states) + theme_minimal() +
   theme(plot.background  = element_rect(fill = "transparent", color = NA),panel.background = element_rect(fill = "transparent", color = NA)) 
@@ -458,11 +437,11 @@ plot_region_prediction <- plot_usmap(data = state_predictions, values = plot_pri
     name = "Predicted Rent in $"
   ) +
   (if (regional_parameter == "state") {
-  geom_text(
-    data = state_predictions[state_predictions$state %in% large_states,],
-    aes(x = x, y = y, label = paste0(state, "\n$", round(.data[[plot_price_method]], 0)),
-        color = ifelse(.data[[plot_price_method]] > 1500, "#f7f7f7", "#1A1A1A")),
-    size = 2, fontface= "bold"
+    geom_text(
+      data = state_predictions[state_predictions$state %in% large_states,],
+      aes(x = x, y = y, label = paste0(state, "\n$", round(.data[[plot_price_method]], 0)),
+          color = ifelse(.data[[plot_price_method]] > 1500, "#f7f7f7", "#1A1A1A")),
+      size = 2, fontface= "bold"
     )}  else {NULL}) + 
   scale_colour_identity(guide = "none") +
   labs(
@@ -483,7 +462,6 @@ plot_region_table <- grid.arrange(
 )
 
 print(plot_region_table)
-save_figure(glue("plot_{regional_parameter}_table"), plot_region_table)
 
 # --- Print subsets ---
 print("We obtain the following subsets by the analysis, as it is less to show which are not part, we do that instead")
